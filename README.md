@@ -131,8 +131,28 @@ text — a head specialized for it may matter less for real-text loss than a hea
 more general work the probe doesn't target. Full write-up:
 `results/interpretability_report.md`.
 
-Scaling efficiency (1/2/4 GPU) and Triton kernel speedup: not yet measured —
-see `HANDOFF.md` for what's next.
+**Triton kernel** (`src/triton_kernels/rmsnorm.py`, hand-written forward + backward,
+correctness/gradient-tested against the PyTorch reference — 3/3 tests pass on the L4):
+
+| | tok/s | MFU |
+|---|---|---|
+| PyTorch RMSNorm (baseline) | 65,484 | 22.47% |
+| Triton RMSNorm | 61,172 | 21.00% |
+
+The Triton kernel is **~6.6% slower**, not faster — reported honestly rather than
+hidden. Reason: `torch.compile` already lowers the plain-PyTorch RMSNorm into a fused,
+autotuned Triton kernel automatically as part of compiling the surrounding graph; the
+hand-written kernel is wrapped in a `torch.autograd.Function`, which forces a
+`torch.compile` graph-break around it, adding dispatch overhead the compiler's own
+fusion doesn't pay. A real, useful finding about when custom kernels are (and
+aren't) worth writing, not a result to paper over — full write-up:
+`results/triton_benchmark.md`.
+
+**DDP / multi-GPU scaling**: deferred. `train.py` is DDP-ready (`torchrun` +
+`DistributedDataParallel`, already used for the interpretability/calibration phases'
+single-GPU runs without any DDP-path changes needed), but a global GCP GPU-quota
+increase (1 → 2) was denied, blocking any multi-GPU run regardless of the regional
+quota (3) — see `HANDOFF.md` for the quota gotcha and what's next.
 
 ## Limitations
 

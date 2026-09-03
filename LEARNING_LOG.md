@@ -686,12 +686,57 @@ stream at the start of a block, not the stream itself), so growth compounds with
 
 Full write-up, all six JSON result files, and six plots: `results/interpretability_report.md`.
 
-## 11. What's next (not done yet as of this log)
+## 12. Triton RMSNorm: a real kernel that turned out to be slower
 
-- Scale to 2 and 4 GPUs with `torchrun`, measure throughput (tokens/sec) and
-  MFU (model FLOPs utilization — measured achieved FLOPs divided by the GPU's
-  theoretical peak, the standard way to report "how efficiently is this
-  actually using the hardware").
-- Triton kernel: one fused op on the hot path, correctness-tested against the
-  plain PyTorch version, benchmarked before/after.
+`F.scaled_dot_product_attention` was the only fused kernel already in the model; this
+phase added a hand-written one for RMSNorm — the mean-square reduction plus rescale that
+runs on every token, every layer. Implemented forward and backward directly in Triton
+(`src/triton_kernels/rmsnorm.py`), wrapped in a `torch.autograd.Function` so it's a
+drop-in replacement for the existing `RMSNorm` module (`ModelConfig.use_triton_rmsnorm`,
+default `False` — no existing checkpoint or config changes behavior). The backward
+derivation matters here specifically because RMSNorm's `rstd` term depends on *every*
+element in the row (via the mean-square), not just the one being differentiated — so it's
+not a simple elementwise gradient; see the docstring in that file for the full derivation
+(`dL/dx_k = rstd*w_k*go_k - (rstd^3 * x_k / N) * sum_i(x_i*w_i*go_i)`).
+
+Correctness (`tests/test_triton_kernels.py`, CUDA-only — skipped on this Mac, verified on
+the VM): forward matches the PyTorch reference, gradients w.r.t. both `x` and `weight`
+match via a direct comparison against PyTorch autograd, and a full model with the kernel
+swapped in produces identical logits to the same model without it, given identical
+weights. All three passed on the first real run — the gradient derivation above held up.
+
+**Benchmark result, and why it matters more than a clean win would have**: at
+`base.yaml`'s real scale (56.6M non-embedding params, 200 steps, `torch.compile` on),
+the Triton kernel measured **~6.6% slower** than plain PyTorch RMSNorm (61,172 tok/s /
+21.00% MFU vs. 65,484 tok/s / 22.47% MFU). This is the actual, honestly-reported result,
+not a discarded failed attempt. The reason is instructive: `torch.compile`'s Inductor
+backend already autotunes and fuses the plain-PyTorch RMSNorm into its own Triton kernel
+as part of compiling the surrounding graph — the hand-written kernel isn't competing
+against "slow uncompiled PyTorch," it's competing against the compiler's own generated
+kernel. Worse, wrapping the custom kernel in a `torch.autograd.Function` forces
+`torch.compile` to graph-break around it, so every call pays eager-mode dispatch overhead
+right where the rest of the model flows through as one compiled region. The lesson: a
+correct, hand-written kernel doesn't automatically beat a modern compiler's fused
+baseline, and the *integration* cost (breaking the compiler's fusion boundary) can matter
+more than the kernel's own execution time. Full write-up: `results/triton_benchmark.md`.
+
+## 13. DDP scaling: blocked by quota, not by the code
+
+`src/train/train.py` was already DDP-ready before this phase (`setup_ddp()`,
+`DistributedDataParallel`, gradient-sync gating via `require_backward_grad_sync`) —
+running it under `torchrun --nproc_per_node=N` needs no code changes. What's actually
+blocking a multi-GPU run is GCP quota: the **global** `GPUS-ALL-REGIONS-per-project`
+quota is granted 1, independently of the **regional** `PREEMPTIBLE-NVIDIA-L4-GPUS`
+quota (granted 3) — two separate caps, the global one sitting underneath the regional
+one (documented in `HANDOFF.md`'s original quota investigation). A small increase
+request (1 → 2, following the "ask small" lesson that worked for the original 0 → 1
+grant) was submitted and denied outright this time — worth noting that "ask small" isn't
+a guaranteed pattern, just a better-odds one. Deferred rather than blocking the rest of
+this phase; the moment quota allows it, the 2/4-GPU throughput and MFU comparison is
+ready to run with no further engineering.
+
+## 14. What's next (not done yet as of this log)
+
+- DDP scaling to 2/4 GPUs, once quota allows (see above — the code is ready, this is
+  purely a GCP quota wait, not an engineering task).
 - Hugging Face push once `HF_TOKEN` is available.
