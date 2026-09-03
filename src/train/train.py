@@ -11,7 +11,14 @@ Multi-GPU (DDP):
 import argparse
 import math
 import os
+import sys
 import time
+
+# stdout is fully buffered (not line-buffered) when redirected to a file/nohup,
+# so print() output can sit unflushed for thousands of lines with no visible
+# progress even though training is actually running. Force line buffering so
+# logs show up in real time when this is launched as `python3 ... > train.log`.
+sys.stdout.reconfigure(line_buffering=True)
 
 import torch
 import torch.distributed as dist
@@ -138,7 +145,7 @@ def main():
                 if step > start_step
                 else 0
             )
-            print(f"step {step} | loss {loss.item() * grad_accum:.4f} | lr {lr:.2e} | tok/s {toks_per_sec:.0f}")
+            print(f"step {step} | loss {loss.item() * grad_accum:.4f} | lr {lr:.2e} | tok/s {toks_per_sec:.0f}", flush=True)
             t0 = time.time()
 
         if is_master and step > 0 and step % cfg["checkpoint_interval"] == 0:
