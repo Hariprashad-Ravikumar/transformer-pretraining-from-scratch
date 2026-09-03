@@ -25,10 +25,11 @@ writeups: [GitHub repo](https://github.com/Hariprashad-Ravikumar/transformer-pre
 
 ## Why this exists
 
-A portfolio project built to close a specific gap: hands-on PyTorch and transformer
-experience backed by a real trained-and-evaluated model, not just framework usage. It's a
-companion to a separate, already-shipped production project (a cost-aware LLM router), and
-it isn't trying to be state of the art, instruction-tuned, or chat-capable.
+This model's companion project, a cost-aware LLM router, calls a pretrained transformer
+through a high-level API and asks when to trust its confidence. This project builds the
+model itself and asks where that confidence actually comes from, mechanistically: attention
+patterns, calibration behavior, what a causal ablation reveals about which heads matter.
+It isn't trying to be state of the art, instruction-tuned, or chat-capable.
 
 ## Usage
 
@@ -131,4 +132,4 @@ real limit of attention-pattern-only probing. Full write-up:
 
 If this is useful, please link back to the
 [GitHub repo](https://github.com/Hariprashad-Ravikumar/transformer-pretraining-from-scratch)
-instead of citing it formally. This is a portfolio and learning project, not a paper.
+instead of citing it formally. This is a learning project, not a paper.

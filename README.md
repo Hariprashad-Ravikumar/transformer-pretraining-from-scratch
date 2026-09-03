@@ -179,7 +179,7 @@ wasn't the case when the demo was originally built and tested against
 placeholder weights). `hf_space/` is fully built and ready to deploy
 (`scripts/push_model_to_hf.py`'s conversion is already verified end to end);
 deploying it is deferred rather than paying for a recurring subscription for a
-portfolio demo.
+demo.
 
 ## Limitations
 

@@ -767,7 +767,7 @@ Pushed to
 Payment Required`. Hugging Face now requires a PRO subscription to host Gradio/Docker
 Spaces on free `cpu-basic` hardware, which wasn't true when `hf_space/` was originally
 built and tested against placeholder weights. Decided to skip paying for a recurring
-subscription for a portfolio demo rather than silently working around it. `hf_space/` is
+subscription rather than silently working around it. `hf_space/` is
 fully built and its `MODEL_REPO` default now points at the real pushed model, ready to
 deploy immediately if that decision changes later.
 

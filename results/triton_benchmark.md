@@ -48,7 +48,7 @@ failed experiment to bury:
 Not every hand-written kernel beats a modern compiler baseline, and integration cost
 (breaking `torch.compile`'s fusion boundary) can outweigh a kernel's own execution time.
 That's a real, useful lesson about when custom kernels are and aren't worth writing, and a
-more honest portfolio result than a fabricated "we made it 20% faster" would be. The path
+more honest result than a fabricated "we made it 20% faster" would be. The path
 to an actual win here would be autotuning the kernel and/or registering it as a proper
 custom op Dynamo can trace through instead of graph-breaking around, both out of scope for
 this pass.
