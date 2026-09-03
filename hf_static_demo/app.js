@@ -1,8 +1,9 @@
 // Runs the model entirely in the browser: ONNX Runtime Web for inference,
 // Transformers.js's AutoTokenizer (only) for tokenization. The sampling loop
 // below is a JS port of the model's own generate_simple() -- same
-// temperature/top-k logic, same fixed-length-recompute-each-step strategy
-// (no KV cache), so behavior matches the Python reference exactly.
+// temperature/top-k/repetition-penalty logic, same fixed-length-recompute-
+// each-step strategy (no KV cache), so behavior matches the Python
+// reference exactly.
 
 import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/+esm";
 import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/+esm";
@@ -13,6 +14,7 @@ const MODEL_REPO = "hari-8/transformer-pretraining-from-scratch";
 const BLOCK_SIZE = 1024;
 const VOCAB_SIZE = 16384;
 const PAD_ID = 0; // <|endoftext|> -- causally masked out, never affects real-token logits
+const REPETITION_PENALTY = 1.3; // Keskar et al. 2019 -- see generate_simple() in the Python model
 
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
@@ -38,10 +40,20 @@ async function loadModel() {
   generateBtn.disabled = false;
 }
 
-function sampleFromLogits(logits, temperature, topK) {
+function sampleFromLogits(logits, temperature, topK, seenIds) {
   // logits: Float32Array of length VOCAB_SIZE
   const scaled = new Float32Array(VOCAB_SIZE);
   for (let i = 0; i < VOCAB_SIZE; i++) scaled[i] = logits[i] / temperature;
+
+  // repetition penalty: soften logits of tokens already generated, so a
+  // high-probability token can't repeat indefinitely ("voltage-voltage-
+  // voltage..."), a real failure mode of this small a model without it.
+  if (REPETITION_PENALTY && REPETITION_PENALTY !== 1.0) {
+    for (const id of seenIds) {
+      const v = scaled[id];
+      scaled[id] = v > 0 ? v / REPETITION_PENALTY : v * REPETITION_PENALTY;
+    }
+  }
 
   // top-k: find the k-th largest value, mask everything below it
   const indexed = Array.from(scaled, (v, i) => [v, i]);
@@ -92,7 +104,7 @@ async function generate(promptText, maxNewTokens, temperature, topK) {
     const offset = lastPos * VOCAB_SIZE;
     const nextTokenLogits = logitsData.subarray(offset, offset + VOCAB_SIZE);
 
-    const nextId = sampleFromLogits(nextTokenLogits, temperature, topK);
+    const nextId = sampleFromLogits(nextTokenLogits, temperature, topK, new Set(ids));
     ids.push(nextId);
 
     const decoded = await tokenizer.decode(ids, { skip_special_tokens: true });

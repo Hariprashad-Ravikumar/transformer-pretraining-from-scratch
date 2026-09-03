@@ -217,18 +217,32 @@ class DecoderTransformerForCausalLM(PreTrainedModel):
         max_new_tokens: int = 50,
         temperature: float = 0.8,
         top_k: int = 40,
+        repetition_penalty: float = 1.3,
     ):
-        """Minimal sampling decode loop (temperature + top-k), recomputing the
-        full sequence each step. This custom architecture doesn't implement
-        HF's KV-cache generation hooks, so this is O(n^2) in sequence length
-        instead of O(n) - fine for short demo completions, not for serving
-        at scale, which is exactly the kind of tradeoff worth being explicit
-        about rather than pretending .generate() here is production-grade."""
+        """Minimal sampling decode loop (temperature + top-k + repetition
+        penalty), recomputing the full sequence each step. This custom
+        architecture doesn't implement HF's KV-cache generation hooks, so
+        this is O(n^2) in sequence length instead of O(n) - fine for short
+        demo completions, not for serving at scale, which is exactly the
+        kind of tradeoff worth being explicit about rather than pretending
+        .generate() here is production-grade.
+
+        repetition_penalty follows Keskar et al. 2019: logits of tokens
+        already in the sequence are softened (divided if positive,
+        multiplied if negative) before sampling. Without this, a ~57M-param
+        model trained on ~1B tokens readily falls into repetition loops
+        ("voltage-voltage-voltage...") at low temperature, since nothing
+        else in this minimal loop discourages repeating a high-probability
+        token indefinitely."""
         self.eval()
         for _ in range(max_new_tokens):
             idx_cond = input_ids[:, -self.config.block_size :]
             logits, _ = self.model(idx_cond)
             logits = logits[:, -1, :] / max(temperature, 1e-5)
+            if repetition_penalty and repetition_penalty != 1.0:
+                for seen_id in set(input_ids[0].tolist()):
+                    logit = logits[0, seen_id]
+                    logits[0, seen_id] = logit / repetition_penalty if logit > 0 else logit * repetition_penalty
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = -float("inf")
