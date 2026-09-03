@@ -6,6 +6,7 @@ Usage:
 
 import argparse
 import glob
+import os
 
 from tokenizers import ByteLevelBPETokenizer
 
@@ -31,6 +32,7 @@ def main():
         min_frequency=args.min_frequency,
         special_tokens=["<|endoftext|>"],
     )
+    os.makedirs(args.out, exist_ok=True)
     tokenizer.save_model(args.out)
     print(f"trained byte-level BPE, vocab_size={args.vocab_size}, saved to {args.out}")
 
