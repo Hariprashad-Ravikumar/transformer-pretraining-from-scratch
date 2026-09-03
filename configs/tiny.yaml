@@ -1,0 +1,32 @@
+# CPU-testable tiny config, no real training signal expected.
+# Purpose: verify the full pipeline (data -> model -> train -> checkpoint -> resume) runs end to end
+# before spending any GPU time.
+seed: 1337
+compile: false
+
+model:
+  vocab_size: 512
+  n_layer: 2
+  n_head: 2
+  n_embd: 64
+  block_size: 64
+  dropout: 0.0
+  bias: false
+
+train_bin: data/tiny/train.bin
+val_bin: data/tiny/val.bin
+checkpoint_path: checkpoints/tiny.pt
+
+lr: 3.0e-4
+min_lr: 3.0e-5
+weight_decay: 0.1
+betas: [0.9, 0.95]
+warmup_steps: 5
+max_steps: 20
+grad_clip: 1.0
+
+micro_batch_size: 4
+grad_accum_steps: 1
+
+log_interval: 5
+checkpoint_interval: 10

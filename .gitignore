@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/raw/
+data/tokenized/
+data/tiny/
+data/tokenizer/
+**/*.bin
+**/*.idx
+checkpoints/
+wandb/
+*.egg-info/
+.DS_Store
+.env

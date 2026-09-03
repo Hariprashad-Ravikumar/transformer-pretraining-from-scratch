@@ -1,0 +1,32 @@
+# ~57M non-embedding params, Chinchilla-ish ratio (~1B tokens, ~18 tok/param) on the
+# fineweb-edu subset tokenized with our own custom BPE (vocab_size=16384).
+seed: 1337
+compile: true
+
+model:
+  vocab_size: 16384
+  n_layer: 8
+  n_head: 12
+  n_embd: 768
+  block_size: 1024
+  dropout: 0.0
+  bias: false
+
+train_bin: data/tokenized/train.bin
+val_bin: data/tokenized/val.bin
+checkpoint_path: checkpoints/base.pt
+
+lr: 6.0e-4
+min_lr: 6.0e-5
+weight_decay: 0.1
+betas: [0.9, 0.95]
+warmup_steps: 200
+max_steps: 20000
+grad_clip: 1.0
+
+# micro_batch_size * grad_accum_steps * block_size * num_gpus = effective tokens/step
+micro_batch_size: 32
+grad_accum_steps: 4
+
+log_interval: 20
+checkpoint_interval: 500
