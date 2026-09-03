@@ -8,7 +8,7 @@ confidence and a custom fused Triton kernel on the hot path.
 [Cost-Aware LLM Router](https://github.com/Hariprashad-Ravikumar/Cost-Aware-Multi-Agent-LLM-Router),
 calls a pretrained transformer via a high-level API (`SentenceTransformer.encode()`) and
 asks *when to trust a model's confidence*. This project builds the model and asks
-*where that confidence comes from in the first place* — no `AutoModel`, no fine-tune,
+*where that confidence comes from in the first place*. No `AutoModel`, no fine-tune:
 every `nn.Module` here is authored in this repo.
 
 ## Status
@@ -17,19 +17,19 @@ Actively in progress. See commit history for what's actually done vs. planned be
 
 ## What this is
 
-- **Model**: pre-norm decoder-only transformer, RMSNorm, rotary position embeddings,
-  SwiGLU MLP, weight-tied embedding/output head — `src/model/transformer.py`.
-- **Tokenizer**: custom byte-level BPE trained on the training corpus (not a reused
-  pretrained tokenizer) — `src/tokenizer/`.
-- **Training**: bf16 mixed precision, `torch.compile`, gradient accumulation,
-  DDP for multi-GPU, checkpoint/resume built to survive Spot preemption —
+- Model: pre-norm decoder-only transformer, RMSNorm, rotary position embeddings,
+  SwiGLU MLP, weight-tied embedding/output head. `src/model/transformer.py`.
+- Tokenizer: custom byte-level BPE trained on the training corpus, not a reused
+  pretrained tokenizer. `src/tokenizer/`.
+- Training: bf16 mixed precision, `torch.compile`, gradient accumulation,
+  DDP for multi-GPU, checkpoint/resume built to survive Spot preemption.
   `src/train/train.py`.
-- **Evaluation**: held-out validation loss/perplexity plus bits-per-byte (BPB) against
-  a named baseline — BPB rather than raw perplexity because our tokenizer's vocabulary
+- Evaluation: held-out validation loss/perplexity plus bits-per-byte (BPB) against
+  a named baseline. BPB rather than raw perplexity because our tokenizer's vocabulary
   isn't the baseline's, so per-token perplexity isn't directly comparable.
-- **Calibration study**: reliability diagrams, ECE, Brier score on token-level
+- Calibration study: reliability diagrams, ECE, Brier score on token-level
   confidence, same methodology as the router project.
-- **Triton kernel**: one fused op on the hot path, correctness-tested against the
+- Triton kernel: one fused op on the hot path, correctness-tested against the
   PyTorch reference, benchmarked before/after on identical hardware.
 
 ## What this deliberately is not
@@ -71,9 +71,9 @@ loss 3.16, no divergence.
 | Pythia-70M baseline | 3.68 | 39.7 | 1.135 |
 
 BPB (not raw perplexity) is the comparable metric here, since the two models
-use different tokenizers — see `src/eval/baseline_pythia.py` for the byte-count
-methodology. Our model scores lower BPB than Pythia-70M on this held-out set;
-the likely explanation is domain match, not general capability — this model was
+use different tokenizers. See `src/eval/baseline_pythia.py` for the byte-count
+methodology. Our model scores lower BPB than Pythia-70M on this held-out set.
+The likely explanation is domain match, not general capability: this model was
 trained exclusively on FineWeb-Edu (educational web text), a narrower and more
 predictable distribution than Pythia's Pile-trained generalist scope, and both
 models are close in parameter count. Caveat: Pythia's training data isn't
@@ -84,8 +84,8 @@ very unlikely.
 ECE/Brier formulas matched to the
 [router repo](https://github.com/Hariprashad-Ravikumar/Cost-Aware-Multi-Agent-LLM-Router)'s
 calibrator report for cross-project comparability; ~249K held-out tokens fit a
-single temperature scalar, ~249K disjoint tokens measure ECE/Brier — a genuine
-generalization test, not a same-distribution sanity check):
+single temperature scalar, and ~249K disjoint tokens measure ECE/Brier, a genuine
+generalization test rather than a same-distribution sanity check):
 
 | | ECE (5 bins) | Brier score |
 |---|---|---|
@@ -94,14 +94,14 @@ generalization test, not a same-distribution sanity check):
 | router calibrator (task-level correctness, for reference) | 0.1671 | 0.1521 |
 
 The model's raw token-level confidence is already close to perfectly
-calibrated — the fitted temperature (1.014) is barely different from 1, and
+calibrated: the fitted temperature (1.014) is barely different from 1, and
 temperature scaling only marginally improves an already-low ECE. This is a
-real, honest finding, not a failure to find something more dramatic: models
+real, honest finding, not a failure to find something more dramatic. Models
 trained end-to-end with softmax cross-entropy on next-token prediction are
 well documented to calibrate more naturally than classifiers trained on
 one-hot labels, because the training objective directly targets the true
 conditional distribution rather than a decision boundary. The router's
-0.1671 ECE isn't a fair "worse" comparison — it's a different task
+0.1671 ECE isn't a fair "worse" comparison; it's a different task
 entirely (task-level response correctness, judged, via a separately-trained
 logistic-regression calibrator on hand-engineered features), included here
 for reference, not as a competing number. Full write-up and the reliability
@@ -111,15 +111,15 @@ diagram: `results/calibration_report.md` / `results/calibration_curve.png`.
 2022, "In-context Learning and Induction Heads"): induction-head probing (synthetic
 repeated-token sequences, prefix-matching attention score), a full causal ablation
 sweep (every head in every layer, held-out loss delta when zeroed), and residual-stream
-norm growth — run on both `base.pt` and a smaller companion checkpoint
+norm growth, run on both `base.pt` and a smaller companion checkpoint
 (`configs/interp_small.yaml`, 4 layers/256 dim, 3,000 steps on the same real corpus).
 
 `base.pt` has two clear induction heads (layer 6 head 8, score 0.79; layer 6 head 4,
-score 0.74 — a scale >10x anything elsewhere in the model), concentrated in layers 6-7.
-`interp_small.pt`'s strongest score is 0.03 — an order of magnitude weaker, consistent
-with induction heads emerging as a fairly sharp phase change during training rather than
-gradually (caveat: this model differs in both scale *and* training length from `base.pt`
-at once, so it isn't a clean scale-only comparison).
+score 0.74, a scale more than 10x anything elsewhere in the model), concentrated in
+layers 6-7. `interp_small.pt`'s strongest score is 0.03, an order of magnitude weaker,
+consistent with induction heads emerging as a fairly sharp phase change during training
+rather than gradually (caveat: this model differs in both scale *and* training length
+from `base.pt` at once, so it isn't a clean scale-only comparison).
 
 The causal ablation sweep is what makes this more than a picture: the heads with the
 highest induction score are *not* reliably the most important by ablation. On `base.pt`,
@@ -127,32 +127,32 @@ the two strongest induction heads rank only 8th and 11th of 12 within their own 
 held-out loss delta when zeroed; the heads that matter most (layer 5 head 4, layer 0 head
 2) show no elevated induction score at all. Likely explanation: the synthetic probe
 targets exact token repeats, a narrow pattern rarely seen verbatim in natural held-out
-text — a head specialized for it may matter less for real-text loss than a head doing
+text, so a head specialized for it may matter less for real-text loss than a head doing
 more general work the probe doesn't target. Full write-up:
 `results/interpretability_report.md`.
 
 **Triton kernel** (`src/triton_kernels/rmsnorm.py`, hand-written forward + backward,
-correctness/gradient-tested against the PyTorch reference — 3/3 tests pass on the L4):
+correctness/gradient-tested against the PyTorch reference; 3/3 tests pass on the L4):
 
 | | tok/s | MFU |
 |---|---|---|
 | PyTorch RMSNorm (baseline) | 65,484 | 22.47% |
 | Triton RMSNorm | 61,172 | 21.00% |
 
-The Triton kernel is **~6.6% slower**, not faster — reported honestly rather than
-hidden. Reason: `torch.compile` already lowers the plain-PyTorch RMSNorm into a fused,
-autotuned Triton kernel automatically as part of compiling the surrounding graph; the
-hand-written kernel is wrapped in a `torch.autograd.Function`, which forces a
+The Triton kernel is **~6.6% slower**, not faster, and that's reported honestly rather
+than hidden. Reason: `torch.compile` already lowers the plain-PyTorch RMSNorm into a
+fused, autotuned Triton kernel automatically as part of compiling the surrounding graph.
+The hand-written kernel is wrapped in a `torch.autograd.Function`, which forces a
 `torch.compile` graph-break around it, adding dispatch overhead the compiler's own
-fusion doesn't pay. A real, useful finding about when custom kernels are (and
-aren't) worth writing, not a result to paper over — full write-up:
+fusion doesn't pay. It's a real, useful finding about when custom kernels are (and
+aren't) worth writing, not a result to paper over. Full write-up:
 `results/triton_benchmark.md`.
 
 **DDP / multi-GPU scaling**: deferred. `train.py` is DDP-ready (`torchrun` +
 `DistributedDataParallel`, already used for the interpretability/calibration phases'
 single-GPU runs without any DDP-path changes needed), but a global GCP GPU-quota
-increase (1 → 2) was denied, blocking any multi-GPU run regardless of the regional
-quota (3) — see `HANDOFF.md` for the quota gotcha and what's next.
+increase (1 to 2) was denied, blocking any multi-GPU run regardless of the regional
+quota (3). See `HANDOFF.md` for the quota gotcha and what's next.
 
 ## Try it
 
@@ -171,16 +171,17 @@ out = model.generate_simple(ids, max_new_tokens=40, temperature=0.8, top_k=40)
 print(tokenizer.decode(out[0].tolist()))
 ```
 
-`trust_remote_code=True` is required — `modeling_decoder_transformer.py` (the
+`trust_remote_code=True` is required: `modeling_decoder_transformer.py` (the
 from-scratch architecture) ships in the model repo itself, not as a stock
-`AutoModel` class. No live demo Space: Hugging Face now requires a PRO
+`AutoModel` class. There's no live demo Space, since Hugging Face now requires a PRO
 subscription to host Gradio/Docker Spaces on free `cpu-basic` hardware (this
 wasn't the case when the demo was originally built and tested against
-placeholder weights) — `hf_space/` is fully built and ready to deploy
-(`scripts/push_model_to_hf.py`'s conversion is already verified end to end),
-deferred rather than paying for a recurring subscription for a portfolio demo.
+placeholder weights). `hf_space/` is fully built and ready to deploy
+(`scripts/push_model_to_hf.py`'s conversion is already verified end to end);
+deploying it is deferred rather than paying for a recurring subscription for a
+portfolio demo.
 
 ## Limitations
 
 Written once training and evaluation are complete, in the author's own words, not
-generated. This section matters more than it looks — see `PROJECT_PLAN.md`.
+generated. This section matters more than it looks. See `PROJECT_PLAN.md`.

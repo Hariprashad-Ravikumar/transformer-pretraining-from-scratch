@@ -20,16 +20,15 @@ clearly elevated prefix-matching score, concentrated in layers 6-7:
   4. layer 0 head 2: 0.0065
   5. layer 0 head 3: 0.0047
 
-**Reading this comparison honestly**: `base.pt` and `interp_small.pt` differ in both model
-scale *and* training length at once (this was a decision baked into the config design
-before this phase started, not an artifact of the analysis) -- so this isn't a clean
-scale-only ablation. What it does show: with a smaller model and roughly 2.5x fewer
-training steps, induction heads have only barely started to emerge, consistent with the
-literature's framing of induction heads as a fairly sharp phase change during training
-rather than a smooth, continuous improvement. It doesn't isolate whether scale or training
-length is the driver.
+`base.pt` and `interp_small.pt` differ in both model scale *and* training length at once
+(this was a decision baked into the config design before this phase started, not an
+artifact of the analysis), so this isn't a clean scale-only ablation. What it does show:
+with a smaller model and roughly 2.5x fewer training steps, induction heads have only
+barely started to emerge, consistent with the literature's framing of induction heads as a
+fairly sharp phase change during training rather than a smooth, continuous improvement. It
+doesn't isolate whether scale or training length is the driver.
 
-## Causal ablation (zero one head, measure held-out loss delta -- full sweep, every head)
+## Causal ablation (zero one head, measure held-out loss delta, full sweep, every head)
 
 **base.pt** baseline held-out loss: 3.2247 nats. Most important heads
 by ablation:
@@ -49,9 +48,9 @@ important heads by ablation:
   4. layer 0 head 2: 0.1428
   5. layer 0 head 1: 0.1172
 
-**The finding that makes this a causal test, not just a picture**: the heads with the
-highest induction (prefix-matching) score are *not* reliably the heads with the largest
-ablation loss delta. In `base.pt`, the two strongest induction heads (layer 6 head 8, score
+The heads with the highest induction (prefix-matching) score are *not* reliably the heads
+with the largest ablation loss delta, which is what makes this a causal test rather than
+just a picture. In `base.pt`, the two strongest induction heads (layer 6 head 8, score
 0.79; layer 6 head 4, score 0.74) rank only 8th and 11th out of 12 heads in their own layer
 by causal importance on held-out natural text. The heads that matter most when ablated
 (layer 5 head 4, layer 0 head 2) show no elevated induction score at all. In
@@ -72,9 +71,9 @@ attention-pattern-based probe, not a failure of the method.
 
 **interp_small.pt**: 1.20, 1.78, 2.20, 3.62 (layers 0-3)
 
-Both grow monotonically with depth, as expected for a pre-norm transformer (each block adds
-to the residual stream without renormalizing it, so norm growth compounds; RMSNorm only
-rescales what's *read* from the stream at the start of each block, not the stream itself).
+Both grow monotonically with depth, as expected for a pre-norm transformer: each block adds
+to the residual stream without renormalizing it, so norm growth compounds. RMSNorm only
+rescales what's *read* from the stream at the start of each block, not the stream itself.
 `base.pt` grows roughly 7x from layer 0 to layer 7; `interp_small.pt` grows roughly 3x over
-its 4 layers -- consistent with more layers compounding more growth, though again confounded
+its 4 layers, consistent with more layers compounding more growth, though again confounded
 with the scale/training-length difference noted above.
