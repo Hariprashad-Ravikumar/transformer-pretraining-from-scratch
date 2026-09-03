@@ -211,13 +211,28 @@ class DecoderTransformerForCausalLM(PreTrainedModel):
         self.model.head = new_embeddings
 
     @torch.no_grad()
-    def generate_greedy(self, input_ids: torch.Tensor, max_new_tokens: int = 50):
-        """Minimal greedy decoding loop, since this custom architecture
-        doesn't implement the KV-cache hooks HF's full .generate() expects."""
+    def generate_simple(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 50,
+        temperature: float = 0.8,
+        top_k: int = 40,
+    ):
+        """Minimal sampling decode loop (temperature + top-k), recomputing the
+        full sequence each step. This custom architecture doesn't implement
+        HF's KV-cache generation hooks, so this is O(n^2) in sequence length
+        instead of O(n) - fine for short demo completions, not for serving
+        at scale, which is exactly the kind of tradeoff worth being explicit
+        about rather than pretending .generate() here is production-grade."""
         self.eval()
         for _ in range(max_new_tokens):
             idx_cond = input_ids[:, -self.config.block_size :]
             logits, _ = self.model(idx_cond)
-            next_id = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+            logits = logits[:, -1, :] / max(temperature, 1e-5)
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("inf")
+            probs = F.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
             input_ids = torch.cat([input_ids, next_id], dim=1)
         return input_ids
