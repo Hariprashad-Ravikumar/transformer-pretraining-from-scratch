@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Transformer Pretrained From Scratch</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 700px;
+    margin: 40px auto;
+    padding: 0 16px;
+    color: #1a1a1a;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .sub { color: #555; font-size: 0.9rem; margin-bottom: 20px; }
+  .sub a { color: #555; }
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 1rem;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+  }
+  .controls {
+    display: flex;
+    gap: 16px;
+    margin: 12px 0;
+    flex-wrap: wrap;
+  }
+  .controls label {
+    font-size: 0.85rem;
+    color: #333;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  button {
+    background: #1a1a1a;
+    color: #fff;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  button:disabled { background: #999; cursor: default; }
+  #output {
+    white-space: pre-wrap;
+    margin-top: 16px;
+    padding: 12px;
+    background: #f7f7f7;
+    border-radius: 6px;
+    min-height: 60px;
+    font-size: 0.95rem;
+  }
+  #status { color: #666; font-size: 0.85rem; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Transformer Pretrained From Scratch</h1>
+<p class="sub">
+  ~57M-parameter decoder-only transformer, pretrained from scratch in PyTorch,
+  running entirely in your browser (ONNX Runtime Web, no server compute).
+  See the
+  <a href="https://github.com/Hariprashad-Ravikumar/transformer-pretraining-from-scratch" target="_blank">GitHub repo</a>
+  and
+  <a href="https://huggingface.co/hari-8/transformer-pretraining-from-scratch" target="_blank">model card</a>
+  for training details and measured results. This is a small research/learning-scale
+  model, not a product: expect noticeably rougher completions than a large hosted model.
+</p>
+
+<textarea id="prompt" rows="3">The transformer architecture</textarea>
+
+<div class="controls">
+  <label>Max new tokens
+    <input id="maxTokens" type="number" min="5" max="150" step="5" value="60" />
+  </label>
+  <label>Temperature
+    <input id="temperature" type="number" min="0.1" max="1.5" step="0.1" value="0.8" />
+  </label>
+  <label>Top-k
+    <input id="topK" type="number" min="1" max="100" step="1" value="40" />
+  </label>
+</div>
+
+<button id="generateBtn">Generate</button>
+<div id="status"></div>
+<div id="output"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

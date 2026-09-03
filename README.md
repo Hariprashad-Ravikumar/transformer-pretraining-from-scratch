@@ -173,13 +173,15 @@ print(tokenizer.decode(out[0].tolist()))
 
 `trust_remote_code=True` is required: `modeling_decoder_transformer.py` (the
 from-scratch architecture) ships in the model repo itself, not as a stock
-`AutoModel` class. There's no live demo Space, since Hugging Face now requires a PRO
-subscription to host Gradio/Docker Spaces on free `cpu-basic` hardware (this
-wasn't the case when the demo was originally built and tested against
-placeholder weights). `hf_space/` is fully built and ready to deploy
-(`scripts/push_model_to_hf.py`'s conversion is already verified end to end);
-deploying it is deferred rather than paying for a recurring subscription for a
-demo.
+`AutoModel` class.
+
+**Live demo**: [hari-8/transformer-pretraining-demo](https://huggingface.co/spaces/hari-8/transformer-pretraining-demo)
+runs the model entirely in the browser via ONNX Runtime Web (`hf_static_demo/`,
+`scripts/export_onnx.py`), sidestepping Hugging Face's requirement of a PRO
+subscription to host Gradio/Docker Spaces on free `cpu-basic` hardware, since
+a Static Space has no server compute at all. The Gradio version
+(`hf_space/`) is also fully built and verified, kept dormant rather than
+deployed, in case a PRO subscription is ever worth it later.
 
 ## Limitations
 

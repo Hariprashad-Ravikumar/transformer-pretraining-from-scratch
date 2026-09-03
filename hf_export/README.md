@@ -23,6 +23,9 @@ byte-level BPE tokenizer, also trained from scratch rather than reusing GPT-2's.
 Full training code, tokenizer, evaluation, calibration study, interpretability pass, and
 writeups: [GitHub repo](https://github.com/Hariprashad-Ravikumar/transformer-pretraining-from-scratch).
 
+**[Try it live](https://huggingface.co/spaces/hari-8/transformer-pretraining-demo)**, no
+install needed: the model runs entirely in your browser via ONNX Runtime Web.
+
 ## Why this exists
 
 This model's companion project, a cost-aware LLM router, calls a pretrained transformer
