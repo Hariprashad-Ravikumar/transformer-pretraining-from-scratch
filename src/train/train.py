@@ -54,6 +54,23 @@ def get_lr(step: int, cfg: dict) -> float:
     return min_lr + coeff * (lr - min_lr)
 
 
+# NVIDIA L4 datasheet, dense (non-sparse) BF16 tensor-core peak.
+# https://resources.nvidia.com/en-us-data-center-overview/l4-gpu-datasheet
+L4_BF16_PEAK_FLOPS = 121e12
+
+
+def estimate_mfu(model_cfg: ModelConfig, non_embedding_params: int, tokens_per_sec: float, num_gpus: int = 1) -> float:
+    """PaLM-appendix-style analytical FLOPs/token estimate: ~6N for the dense
+    matmuls (forward+backward, 2x fwd + 4x bwd per param) plus an attention
+    term for the O(T) self-attention matmuls, which 6N alone doesn't capture."""
+    N = non_embedding_params
+    T = model_cfg.block_size
+    flops_per_token = 6 * N + 12 * model_cfg.n_layer * model_cfg.n_head * (model_cfg.n_embd // model_cfg.n_head) * T
+    achieved_flops = flops_per_token * tokens_per_sec
+    peak_flops = L4_BF16_PEAK_FLOPS * num_gpus
+    return achieved_flops / peak_flops
+
+
 def save_checkpoint(path, model, optimizer, step, cfg):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     raw_model = model.module if isinstance(model, DDP) else model
@@ -91,8 +108,9 @@ def main():
 
     model_cfg = ModelConfig(**cfg["model"])
     model = DecoderTransformer(model_cfg).to(device)
+    non_embedding_params = model.num_params()
     if is_master:
-        print(f"model params (non-embedding): {model.num_params():,}")
+        print(f"model params (non-embedding): {non_embedding_params:,}")
 
     if cfg.get("compile", True) and use_cuda:
         model = torch.compile(model)
@@ -145,7 +163,11 @@ def main():
                 if step > start_step
                 else 0
             )
-            print(f"step {step} | loss {loss.item() * grad_accum:.4f} | lr {lr:.2e} | tok/s {toks_per_sec:.0f}", flush=True)
+            mfu = estimate_mfu(model_cfg, non_embedding_params, toks_per_sec, num_gpus=world_size) if use_cuda and toks_per_sec > 0 else 0.0
+            print(
+                f"step {step} | loss {loss.item() * grad_accum:.4f} | lr {lr:.2e} | tok/s {toks_per_sec:.0f} | mfu {mfu * 100:.2f}%",
+                flush=True,
+            )
             t0 = time.time()
 
         if is_master and step > 0 and step % cfg["checkpoint_interval"] == 0:

@@ -26,15 +26,21 @@ class ModelConfig:
     block_size: int = 1024
     dropout: float = 0.0
     bias: bool = False
+    use_triton_rmsnorm: bool = False
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-5):
+    def __init__(self, dim: int, eps: float = 1e-5, use_triton: bool = False):
         super().__init__()
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
+        self.use_triton = use_triton
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.use_triton and x.is_cuda:
+            from src.triton_kernels.rmsnorm import triton_rmsnorm
+
+            return triton_rmsnorm(x, self.weight, self.eps)
         norm = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
         return norm * self.weight
 
@@ -123,9 +129,9 @@ class SwiGLU(nn.Module):
 class Block(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super().__init__()
-        self.ln1 = RMSNorm(cfg.n_embd)
+        self.ln1 = RMSNorm(cfg.n_embd, use_triton=cfg.use_triton_rmsnorm)
         self.attn = CausalSelfAttention(cfg)
-        self.ln2 = RMSNorm(cfg.n_embd)
+        self.ln2 = RMSNorm(cfg.n_embd, use_triton=cfg.use_triton_rmsnorm)
         self.mlp = SwiGLU(cfg)
 
     def forward(
@@ -149,7 +155,7 @@ class DecoderTransformer(nn.Module):
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.drop = nn.Dropout(cfg.dropout)
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layer)])
-        self.ln_f = RMSNorm(cfg.n_embd)
+        self.ln_f = RMSNorm(cfg.n_embd, use_triton=cfg.use_triton_rmsnorm)
         self.head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.head.weight = self.tok_emb.weight  # weight tying
 
