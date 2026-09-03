@@ -14,9 +14,7 @@ import gradio as gr
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Set to your HF Hub repo id once the trained model is pushed, e.g.
-# "your-username/transformer-pretraining-from-scratch"
-MODEL_REPO = os.environ.get("MODEL_REPO", "your-username/transformer-pretraining-from-scratch")
+MODEL_REPO = os.environ.get("MODEL_REPO", "hari-8/transformer-pretraining-from-scratch")
 
 print(f"loading {MODEL_REPO} ...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO, trust_remote_code=True)

@@ -154,6 +154,32 @@ single-GPU runs without any DDP-path changes needed), but a global GCP GPU-quota
 increase (1 → 2) was denied, blocking any multi-GPU run regardless of the regional
 quota (3) — see `HANDOFF.md` for the quota gotcha and what's next.
 
+## Try it
+
+The trained model and tokenizer are live on the Hugging Face Hub:
+[hari-8/transformer-pretraining-from-scratch](https://huggingface.co/hari-8/transformer-pretraining-from-scratch).
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+repo = "hari-8/transformer-pretraining-from-scratch"
+model = AutoModelForCausalLM.from_pretrained(repo, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(repo)
+
+ids = tokenizer("The history of the Roman Empire", return_tensors="pt").input_ids
+out = model.generate_simple(ids, max_new_tokens=40, temperature=0.8, top_k=40)
+print(tokenizer.decode(out[0].tolist()))
+```
+
+`trust_remote_code=True` is required — `modeling_decoder_transformer.py` (the
+from-scratch architecture) ships in the model repo itself, not as a stock
+`AutoModel` class. No live demo Space: Hugging Face now requires a PRO
+subscription to host Gradio/Docker Spaces on free `cpu-basic` hardware (this
+wasn't the case when the demo was originally built and tested against
+placeholder weights) — `hf_space/` is fully built and ready to deploy
+(`scripts/push_model_to_hf.py`'s conversion is already verified end to end),
+deferred rather than paying for a recurring subscription for a portfolio demo.
+
 ## Limitations
 
 Written once training and evaluation are complete, in the author's own words, not

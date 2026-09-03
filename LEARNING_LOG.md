@@ -735,8 +735,41 @@ a guaranteed pattern, just a better-odds one. Deferred rather than blocking the 
 this phase; the moment quota allows it, the 2/4-GPU throughput and MFU comparison is
 ready to run with no further engineering.
 
-## 14. What's next (not done yet as of this log)
+## 14. Hugging Face push: the conversion bug the verification step exists to catch
+
+`HF_TOKEN` was set (via `~/.zshrc`, never pasted into a session directly per the original
+plan). `scripts/push_model_to_hf.py` converts `checkpoints/base.pt` into the
+`hf_export/` format, and deliberately verifies before ever calling `push_to_hub`: it
+builds both the training-arch model and the HF wrapper from the *same* checkpoint state
+dict, runs an identical input through both, and asserts the logits match exactly. This
+caught a real issue on the first run — `load_state_dict(strict=True)` (the default)
+failed on `rope_cos`/`rope_sin`, because those buffers are `persistent=False` in the
+training-time model (not saved in the checkpoint) but `persistent=True` in the HF wrapper
+(HANDOFF's already-documented bug #5, about `from_pretrained`'s meta-device fast-init path
+never filling in non-persistent buffers). Fix: `strict=False` for that specific load, with
+an explicit assertion that the *only* missing keys are those two rope buffers — narrow
+enough that a genuinely wrong/incomplete state dict would still fail loudly rather than
+silently loading with strict=False papering over a real problem.
+
+After that fix, the full pipeline verified clean: converted-model logits matched the
+training model exactly, the full `save_pretrained` → `AutoModelForCausalLM.from_pretrained
+(trust_remote_code=True)` round-trip from disk loaded correctly, and a real generation
+sample from the trained weights ("The history of the Roman Empire...") came back
+grammatically coherent and topically on-target — the clearest evidence yet that training
+actually produced a working language model, not just a checkpoint with a good loss number.
+
+Pushed to
+[hari-8/transformer-pretraining-from-scratch](https://huggingface.co/hari-8/transformer-pretraining-from-scratch)
+(model + tokenizer, public). The Gradio Space was not deployed: creating it hit a `402
+Payment Required` — Hugging Face now requires a PRO subscription to host Gradio/Docker
+Spaces on free `cpu-basic` hardware, which wasn't true when `hf_space/` was originally
+built and tested against placeholder weights. Decided to skip paying for a recurring
+subscription for a portfolio demo rather than silently working around it — `hf_space/` is
+fully built and its `MODEL_REPO` default now points at the real pushed model, ready to
+deploy immediately if that decision changes later.
+
+## 15. What's next (not done yet as of this log)
 
 - DDP scaling to 2/4 GPUs, once quota allows (see above — the code is ready, this is
   purely a GCP quota wait, not an engineering task).
-- Hugging Face push once `HF_TOKEN` is available.
+- Gradio Space deployment, if HF PRO is ever worth it for this project.
