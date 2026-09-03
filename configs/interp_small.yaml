@@ -1,0 +1,40 @@
+# Small-scale companion run for the interpretability scale comparison, NOT a
+# quality-focused model. Trained on the same REAL tokenized corpus as base.yaml
+# (unlike gpu_smoke.yaml, which uses synthetic random tokens and has no
+# linguistic structure for an induction head to learn).
+#
+# Kept short deliberately: induction heads have been documented (Anthropic's
+# induction-heads work) to emerge as a fairly sharp, early phase change during
+# training, not gradually near convergence - so this doesn't need the full
+# ~1B-token budget to answer "does this phenomenon show up at this scale."
+seed: 1337
+compile: true
+
+model:
+  vocab_size: 16384
+  n_layer: 4
+  n_head: 4
+  n_embd: 256
+  block_size: 1024
+  dropout: 0.0
+  bias: false
+
+train_bin: data/tokenized/train.bin   # same real corpus as base.yaml
+val_bin: data/tokenized/val.bin
+checkpoint_path: checkpoints/interp_small.pt
+
+lr: 6.0e-4
+min_lr: 6.0e-5
+weight_decay: 0.1
+betas: [0.9, 0.95]
+warmup_steps: 100
+max_steps: 3000        # short on purpose - see note above, adjust if the
+                        # induction-head probe finds nothing and more steps
+                        # seem likely to help
+grad_clip: 1.0
+
+micro_batch_size: 48
+grad_accum_steps: 2
+
+log_interval: 20
+checkpoint_interval: 250
