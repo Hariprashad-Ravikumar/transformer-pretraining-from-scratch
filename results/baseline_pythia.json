@@ -1,0 +1,8 @@
+{
+  "model": "EleutherAI/pythia-70m",
+  "held_out_bytes": 2161153,
+  "eval_tokens": 461824,
+  "loss_nats": 3.6804886710088693,
+  "perplexity": 39.66577285049991,
+  "bits_per_byte": 1.1346737521177468
+}

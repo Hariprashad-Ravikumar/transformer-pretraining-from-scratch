@@ -1,0 +1,10 @@
+{
+  "checkpoint": "checkpoints/interp_small.pt",
+  "n_layer": 4,
+  "norms_by_layer": [
+    1.203207015991211,
+    1.7790348529815674,
+    2.202910900115967,
+    3.620830535888672
+  ]
+}

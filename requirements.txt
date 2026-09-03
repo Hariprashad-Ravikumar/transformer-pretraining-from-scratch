@@ -5,3 +5,5 @@ numpy
 tqdm
 pyyaml
 wandb
+matplotlib
+transformers

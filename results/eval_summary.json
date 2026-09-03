@@ -1,0 +1,9 @@
+{
+  "checkpoint_step": 7630,
+  "held_out_tokens": 497497,
+  "held_out_bytes": 2161153,
+  "eval_tokens": 496640,
+  "loss_nats": 3.1869766820337353,
+  "perplexity": 24.215106695848476,
+  "bits_per_byte": 1.056597566286128
+}

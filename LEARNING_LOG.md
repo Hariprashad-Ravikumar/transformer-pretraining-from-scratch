@@ -537,19 +537,161 @@ run for real rather than assumed to work.
 
 ---
 
-## 8. What's next (not done yet as of this log)
+## 8. The real training run, and what evaluation found
 
-- Launch the real `base.yaml` training run on the full ~1B-token corpus.
-- Evaluate: held-out loss, perplexity, and bits-per-byte against a named
-  baseline (baseline model not yet chosen — needs to be picked once the actual
-  corpus domain is confirmed, so BPB comparison is apples-to-apples).
+The real `base.yaml` run completed: 7,630 steps on the full ~1B-token FineWeb-Edu
+sample on one L4, ~67,400 tok/s throughout, final training loss 3.16. No NaNs,
+no divergence, no intervention needed — the loss curve was noisy step-to-step
+(mini-batch variance at `micro_batch_size: 32`) but trended down smoothly across
+the run, consistent with the warmup/cosine-decay schedule in `get_lr()`.
+
+**Evaluation** (`src/eval/evaluate.py`, `src/eval/baseline_pythia.py`) ran on
+497K held-out tokens the model never trained on:
+
+- Held-out loss (3.19 nats) came in essentially identical to the last few
+  logged training-loss values (3.1–3.3) — the expected result for a model that
+  saw each token roughly once (Chinchilla-ish ~18 tok/param ratio, not enough
+  passes over the data to meaningfully overfit at this scale).
+- Bits-per-byte, not perplexity, is the comparable metric across models with
+  different tokenizers — perplexity is defined per-token, and our custom BPE's
+  tokens aren't the same unit as Pythia's. BPB normalizes by the byte length of
+  the *original text*, which is tokenizer-invariant. The methodology: decode
+  `val.bin` back to its original text (byte-level BPE decode is lossless, so
+  this reconstructs the exact held-out text with no information loss), feed
+  that identical text through each model's own tokenizer, and divide total nats
+  by `ln(2) × text byte length` for both.
+- Result: this model scored 1.057 BPB vs. Pythia-70M's 1.135 BPB on the same
+  held-out text. The honest read isn't "beats a real research baseline" — it's
+  that this model trained exclusively on FineWeb-Edu, a narrower, more
+  predictable educational-text distribution, while Pythia-70M trained on the
+  much broader Pile. Domain match, not general capability, is the more likely
+  explanation, and the two are close in parameter count. Worth stating plainly
+  in any writeup rather than letting the number imply more than it shows.
+
+Full numbers are in `README.md`'s Results section and
+`results/eval_summary.json` / `results/baseline_pythia.json`.
+
+## 9. Calibration study, and a genuinely surprising result
+
+`src/eval/calibration.py` measures token-level calibration: for each held-out
+token, confidence = the model's max softmax probability, label = whether that
+top-1 prediction matches the actual next token (Guo et al. 2017's definition —
+structurally identical to the router project's `(predicted_probability,
+is_correct)` pairs, so the same ECE/Brier code applies to both;
+`src/eval/calibration_stats.py` ports the router's `stats_utils.py` formulas
+verbatim rather than reimplementing them slightly differently).
+
+**Split methodology, stronger than the router's own precedent**: `val.bin` was
+split down the middle — the first half (subsampled to 20,480 tokens, since one
+scalar parameter doesn't need hundreds of thousands of examples to fit) fit a
+temperature scalar via LBFGS on cached logits; the second, disjoint half (never
+touched during fitting) is what ECE/Brier are measured on. The router's own
+report explicitly flags its validation split as "a sanity check, not the real
+generalization test" — this setup avoids that caveat entirely.
+
+**Result**: raw ECE = 0.0071, Brier = 0.1572, on ~249K held-out tokens. Fitted
+temperature T = 1.014 — essentially 1, meaning temperature scaling barely
+moved anything (scaled ECE = 0.0047, a small further improvement, not a fix
+for a real problem). The reliability diagram (`results/calibration_curve.png`)
+sits almost exactly on the diagonal at every confidence bin.
+
+This is the kind of result worth resisting the urge to spin up: it isn't a
+weak or unfinished study, it's an honest negative-ish finding — the model
+turned out to already be well-calibrated, so there wasn't much for temperature
+scaling to fix. The likely reason: next-token prediction trained end-to-end
+with softmax cross-entropy on a large corpus directly targets the true
+conditional distribution over the vocabulary, unlike a classifier trained on
+one-hot labels (the setting Guo et al. 2017's headline "modern neural networks
+are overconfident" result comes from) which only has to get the *argmax*
+right, and can freely overshoot confidence elsewhere without being penalized
+at training time. A from-scratch, from-first-principles calibration
+measurement landing near-diagonal is itself evidence the training objective
+did what it's supposed to do — that's the honest way to frame it, not
+"nothing interesting happened here."
+
+**Cross-project comparison, with the confound stated up front**: the router's
+task-level calibrator (is a routed LLM response *correct*, a judged semantic
+notion, predicted via a trained logistic regression on hand-engineered
+features) scores 0.1671 ECE / 0.1521 Brier — worse-looking numbers, but not a
+fair "our model calibrates better" claim. Different task, different label
+distribution, different downstream stakes, and a very different amount of
+engineering behind the confidence estimate. What's comparable is the
+calibration *behavior* — whether raw confidence over/under-shoots accuracy,
+and whether a standard post-hoc fix narrows the gap — not the raw numbers
+side by side. Full write-up: `results/calibration_report.md`.
+
+## 10. Interpretability: instrumenting the model without breaking training
+
+`F.scaled_dot_product_attention` (the fused kernel `CausalSelfAttention` uses for speed)
+never exposes attention weights, and gives no way to zero one head's contribution before
+the output projection — both needed for interpretability, neither needed for training or
+eval. Rather than write a separate, duplicated forward pass for probing (which risks
+drifting out of sync with the real model), `CausalSelfAttention`/`Block`/
+`DecoderTransformer.forward` got optional `return_attn`/`ablate` kwargs that switch to a
+manual (non-fused) attention computation *only* when set — the fast fused path is
+untouched for every existing caller. This did change `forward`'s return signature from
+`(logits, loss)` to `(logits, loss, attn_weights)` everywhere (attn_weights is `None`
+unless requested) — every existing caller (`train.py`, `evaluate.py`, `calibration.py`,
+`tests/test_model.py`) needed a one-line update to unpack three values instead of two.
+A new test (`test_manual_attention_matches_fused`) checks the manual path reproduces the
+fused path's output exactly when no ablation is applied — this is the safety net that
+would have caught a bug in the manual reimplementation before it silently corrupted every
+downstream interpretability number.
+
+**Induction-head probe** (`src/interpretability/induction_heads.py`, Olsson et al. 2022
+methodology): feed sequences of random tokens repeated twice, measure how much attention
+weight the second occurrence of a token puts on the position that followed that token's
+*first* occurrence. Sanity-checked on a random-init model first — scores came back flat
+and near chance level (~0.043 vs. an expected ~0.06 for seq_len=16), confirming the metric
+itself isn't spuriously elevated for an untrained model before trusting it on real
+checkpoints.
+
+**Result**: `base.pt` has two unmistakable induction heads (layer 6 head 8, score 0.79;
+layer 6 head 4, score 0.74 — both far above every other head), concentrated specifically
+in layers 6-7 of 8. `interp_small.pt`'s strongest score is 0.03, an order of magnitude
+weaker — consistent with induction heads being a fairly sharp phase-change phenomenon
+during training that a shorter, smaller run has only begun to develop. Caveat worth
+repeating: `interp_small.pt` differs from `base.pt` in both architecture *and* training
+length simultaneously (a property of the config design decided before this phase, not
+something fixable after the fact), so this doesn't cleanly isolate scale from training
+length as the cause.
+
+**Causal ablation** (`src/interpretability/ablation.py`): full sweep, every head in every
+layer on both checkpoints (96 + 16 ablations), held-out loss delta when each is zeroed
+(bounded to a 16,384-token subset of `val.bin` — a full sweep over the full 497K-token set
+wasn't compute-sensible, and one forward pass per ablation calibrated at ~1s per pass on
+this scale, confirmed by timing a small run before committing to the full sweep).
+
+This is the finding that turns the induction-head numbers into an actual causal claim
+rather than a picture: **the highest-scoring induction heads are not reliably the most
+important by ablation.** On `base.pt`, layer 6 heads 8 and 4 (the two clear induction
+heads) rank only 8th and 11th of 12 heads in their own layer by held-out loss delta when
+ablated. The heads that matter *most* causally (layer 5 head 4, delta +0.074; layer 0 head
+2, delta +0.063) show no elevated induction score at all. On `interp_small.pt` the two
+measures agree better (the top induction-score head is also the 2nd-most-important by
+ablation) but still not perfectly. The likely reason: the synthetic probe targets *exact*
+token repeats, a narrow pattern rare in natural held-out text — a head highly specialized
+for that pattern may matter less for real-text loss than a head doing more diffuse work
+the synthetic probe was never designed to detect. This is a genuine limitation of a
+purely attention-pattern-based probe, worth stating as a finding rather than smoothing
+over to make the story cleaner.
+
+**Residual-stream norm growth** (`src/interpretability/residual_norms.py`, external
+`register_forward_hook`s on each `Block` — no `transformer.py` changes needed for this
+one): monotonic growth with depth in both checkpoints (`base.pt`: 12.7 → 88.6 nats-scale
+norm across 8 layers, roughly 7x; `interp_small.pt`: 1.2 → 3.6 across 4 layers, roughly
+3x) — the expected signature of a pre-norm transformer, where each block adds to the
+residual stream without renormalizing it (RMSNorm only rescales what's *read* from the
+stream at the start of a block, not the stream itself), so growth compounds with depth.
+
+Full write-up, all six JSON result files, and six plots: `results/interpretability_report.md`.
+
+## 11. What's next (not done yet as of this log)
+
 - Scale to 2 and 4 GPUs with `torchrun`, measure throughput (tokens/sec) and
   MFU (model FLOPs utilization — measured achieved FLOPs divided by the GPU's
   theoretical peak, the standard way to report "how efficiently is this
   actually using the hardware").
 - Triton kernel: one fused op on the hot path, correctness-tested against the
   plain PyTorch version, benchmarked before/after.
-- Calibration study (ECE, Brier score, reliability diagrams) on token-level
-  confidence — same methodology already used in the router project, applied
-  here to a model trained from scratch instead of a pretrained one called via
-  API.
+- Hugging Face push once `HF_TOKEN` is available.

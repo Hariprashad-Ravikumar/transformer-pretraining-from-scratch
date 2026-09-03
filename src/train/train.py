@@ -132,7 +132,7 @@ def main():
             if is_ddp:
                 model.require_backward_grad_sync = micro_step == grad_accum - 1
             with torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=dtype):
-                _, loss = model(x, y)
+                _, loss, _ = model(x, y)
                 loss = loss / grad_accum
             loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.get("grad_clip", 1.0))

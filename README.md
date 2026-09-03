@@ -59,8 +59,80 @@ torchrun --standalone --nproc_per_node=4 -m src.train.train --config configs/bas
 
 ## Results
 
-Filled in once measured — perplexity/BPB vs. baseline, scaling efficiency at 1/2/4
-GPUs (tokens/sec, MFU), Triton kernel speedup, calibration ECE/Brier. Not estimated.
+**Pretraining** (`configs/base.yaml`, 57M non-embedding params, ~1B tokens on a
+FineWeb-Edu sample, single L4 GPU): 7,630 steps, ~67,400 tok/s, final training
+loss 3.16, no divergence.
+
+**Held-out evaluation** (`src/eval/evaluate.py`, 497K held-out tokens):
+
+| | loss (nats) | perplexity | bits-per-byte |
+|---|---|---|---|
+| this model | 3.19 | 24.2 | **1.057** |
+| Pythia-70M baseline | 3.68 | 39.7 | 1.135 |
+
+BPB (not raw perplexity) is the comparable metric here, since the two models
+use different tokenizers — see `src/eval/baseline_pythia.py` for the byte-count
+methodology. Our model scores lower BPB than Pythia-70M on this held-out set;
+the likely explanation is domain match, not general capability — this model was
+trained exclusively on FineWeb-Edu (educational web text), a narrower and more
+predictable distribution than Pythia's Pile-trained generalist scope, and both
+models are close in parameter count. Caveat: Pythia's training data isn't
+independently verified to exclude these exact FineWeb-Edu rows, though a leak is
+very unlikely.
+
+**Token-level calibration study** (`src/eval/calibration.py`, methodology and
+ECE/Brier formulas matched to the
+[router repo](https://github.com/Hariprashad-Ravikumar/Cost-Aware-Multi-Agent-LLM-Router)'s
+calibrator report for cross-project comparability; ~249K held-out tokens fit a
+single temperature scalar, ~249K disjoint tokens measure ECE/Brier — a genuine
+generalization test, not a same-distribution sanity check):
+
+| | ECE (5 bins) | Brier score |
+|---|---|---|
+| this model, raw (T=1) | **0.0071** | 0.1572 |
+| this model, temperature-scaled (T=1.014) | 0.0047 | 0.1571 |
+| router calibrator (task-level correctness, for reference) | 0.1671 | 0.1521 |
+
+The model's raw token-level confidence is already close to perfectly
+calibrated — the fitted temperature (1.014) is barely different from 1, and
+temperature scaling only marginally improves an already-low ECE. This is a
+real, honest finding, not a failure to find something more dramatic: models
+trained end-to-end with softmax cross-entropy on next-token prediction are
+well documented to calibrate more naturally than classifiers trained on
+one-hot labels, because the training objective directly targets the true
+conditional distribution rather than a decision boundary. The router's
+0.1671 ECE isn't a fair "worse" comparison — it's a different task
+entirely (task-level response correctness, judged, via a separately-trained
+logistic-regression calibrator on hand-engineered features), included here
+for reference, not as a competing number. Full write-up and the reliability
+diagram: `results/calibration_report.md` / `results/calibration_curve.png`.
+
+**Interpretability pass** (`src/interpretability/`, methodology from Olsson et al.
+2022, "In-context Learning and Induction Heads"): induction-head probing (synthetic
+repeated-token sequences, prefix-matching attention score), a full causal ablation
+sweep (every head in every layer, held-out loss delta when zeroed), and residual-stream
+norm growth — run on both `base.pt` and a smaller companion checkpoint
+(`configs/interp_small.yaml`, 4 layers/256 dim, 3,000 steps on the same real corpus).
+
+`base.pt` has two clear induction heads (layer 6 head 8, score 0.79; layer 6 head 4,
+score 0.74 — a scale >10x anything elsewhere in the model), concentrated in layers 6-7.
+`interp_small.pt`'s strongest score is 0.03 — an order of magnitude weaker, consistent
+with induction heads emerging as a fairly sharp phase change during training rather than
+gradually (caveat: this model differs in both scale *and* training length from `base.pt`
+at once, so it isn't a clean scale-only comparison).
+
+The causal ablation sweep is what makes this more than a picture: the heads with the
+highest induction score are *not* reliably the most important by ablation. On `base.pt`,
+the two strongest induction heads rank only 8th and 11th of 12 within their own layer by
+held-out loss delta when zeroed; the heads that matter most (layer 5 head 4, layer 0 head
+2) show no elevated induction score at all. Likely explanation: the synthetic probe
+targets exact token repeats, a narrow pattern rarely seen verbatim in natural held-out
+text — a head specialized for it may matter less for real-text loss than a head doing
+more general work the probe doesn't target. Full write-up:
+`results/interpretability_report.md`.
+
+Scaling efficiency (1/2/4 GPU) and Triton kernel speedup: not yet measured —
+see `HANDOFF.md` for what's next.
 
 ## Limitations
 

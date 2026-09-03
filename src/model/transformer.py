@@ -65,7 +65,14 @@ class CausalSelfAttention(nn.Module):
         self.proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
         self.dropout = cfg.dropout
 
-    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        return_attn: bool = False,
+        ablate_head: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, T, C = x.shape
         q, k, v = self.qkv(x).split(C, dim=2)
         q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
@@ -75,11 +82,28 @@ class CausalSelfAttention(nn.Module):
         q = apply_rope(q, cos, sin)
         k = apply_rope(k, cos, sin)
 
-        y = F.scaled_dot_product_attention(
-            q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0.0
-        )
+        attn_weights = None
+        if return_attn or ablate_head is not None:
+            # manual (non-fused) attention -- only path that exposes per-head
+            # weights and lets a head's value contribution be zeroed before
+            # recombination. Not used in training/normal eval, where the
+            # fused F.scaled_dot_product_attention kernel is faster.
+            scores = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            causal_mask = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=1)
+            scores = scores.masked_fill(causal_mask, float("-inf"))
+            attn_weights = torch.softmax(scores, dim=-1)
+            if ablate_head is not None:
+                v = v.clone()
+                v[:, ablate_head, :, :] = 0.0
+            y = attn_weights @ v
+            if not return_attn:
+                attn_weights = None
+        else:
+            y = F.scaled_dot_product_attention(
+                q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0.0
+            )
         y = y.transpose(1, 2).contiguous().view(B, T, C)
-        return self.proj(y)
+        return self.proj(y), attn_weights
 
 
 class SwiGLU(nn.Module):
@@ -104,10 +128,18 @@ class Block(nn.Module):
         self.ln2 = RMSNorm(cfg.n_embd)
         self.mlp = SwiGLU(cfg)
 
-    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.ln1(x), cos, sin)
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        return_attn: bool = False,
+        ablate_head: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        attn_out, attn_weights = self.attn(self.ln1(x), cos, sin, return_attn, ablate_head)
+        x = x + attn_out
         x = x + self.mlp(self.ln2(x))
-        return x
+        return x, attn_weights
 
 
 class DecoderTransformer(nn.Module):
@@ -146,13 +178,26 @@ class DecoderTransformer(nn.Module):
             n -= self.tok_emb.weight.numel()
         return n
 
-    def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None):
+    def forward(
+        self,
+        idx: torch.Tensor,
+        targets: torch.Tensor | None = None,
+        capture_attn: bool = False,
+        ablate: tuple[int, int] | None = None,
+    ):
+        """ablate: (layer_idx, head_idx) to zero that head's value contribution
+        in that layer only. capture_attn: return each layer's attention
+        weights as a list (index i = layer i), else None."""
         B, T = idx.shape
         assert T <= self.cfg.block_size, f"sequence length {T} exceeds block_size {self.cfg.block_size}"
         x = self.drop(self.tok_emb(idx))
         cos, sin = self.rope_cos.to(x.device), self.rope_sin.to(x.device)
-        for block in self.blocks:
-            x = block(x, cos, sin)
+        attn_weights_per_layer = [] if capture_attn else None
+        for layer_idx, block in enumerate(self.blocks):
+            ablate_head = ablate[1] if ablate is not None and ablate[0] == layer_idx else None
+            x, attn_weights = block(x, cos, sin, return_attn=capture_attn, ablate_head=ablate_head)
+            if capture_attn:
+                attn_weights_per_layer.append(attn_weights)
         x = self.ln_f(x)
         logits = self.head(x)
 
@@ -161,7 +206,7 @@ class DecoderTransformer(nn.Module):
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
             )
-        return logits, loss
+        return logits, loss, attn_weights_per_layer
 
     def configure_optimizers(self, weight_decay: float, lr: float, betas: tuple[float, float]):
         decay, no_decay = [], []

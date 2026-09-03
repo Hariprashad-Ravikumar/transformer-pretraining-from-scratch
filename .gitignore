@@ -6,6 +6,7 @@ data/raw/
 data/tokenized/
 data/tiny/
 data/tokenizer/
+data/eval_holdout.txt
 **/*.bin
 **/*.idx
 checkpoints/
